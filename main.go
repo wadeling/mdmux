@@ -1,12 +1,47 @@
 package main
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-var db = make(map[string]string)
+var tr *Trigger
+
+func doEvent(c *gin.Context) {
+	var ev Event
+	if c.Bind(&ev) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error"})
+		return
+	}
+	log.Printf("get event:%+v", ev)
+	err := tr.AddEvent(&ev)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "add event error"})
+		return
+	}
+
+	// dump events
+	tr.DumpEventList()
+
+	// check top events
+	evs, err := tr.GetEventsFront()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "get events front error"})
+		return
+	}
+	log.Printf("evs %+v", evs)
+
+	// do something with events
+	// do your staff
+
+	c.JSON(http.StatusCreated, gin.H{"status": "do event ok"})
+}
+
+func getEvents(c *gin.Context) {
+	tr.DumpEventList()
+}
 
 func setupRouter() *gin.Engine {
 	// Disable Console Color
@@ -18,48 +53,21 @@ func setupRouter() *gin.Engine {
 		c.String(http.StatusOK, "pong")
 	})
 
-	// Get user value
-	r.GET("/user/:name", func(c *gin.Context) {
-		user := c.Params.ByName("name")
-		value, ok := db[user]
-		if ok {
-			c.JSON(http.StatusOK, gin.H{"user": user, "value": value})
-		} else {
-			c.JSON(http.StatusOK, gin.H{"user": user, "status": "no value"})
-		}
-	})
+	// Post event
+	r.POST("/trigger/events", doEvent)
 
-	// Authorized group (uses gin.BasicAuth() middleware)
-	// Same than:
-	// authorized := r.Group("/")
-	// authorized.Use(gin.BasicAuth(gin.Credentials{
-	//	  "foo":  "bar",
-	//	  "manu": "123",
-	//}))
-	authorized := r.Group("/", gin.BasicAuth(gin.Accounts{
-		"foo":  "bar", // user:foo password:bar
-		"manu": "123", // user:manu password:123
-	}))
+	// get events
+	r.GET("/trigger/events", getEvents)
 
-	authorized.POST("admin", func(c *gin.Context) {
-		//log.Print("deal post admin")
-		user := c.MustGet(gin.AuthUserKey).(string)
-		//log.Println("user",user)
-		// Parse JSON
-		var json struct {
-			Value string `json:"value" binding:"required"`
-		}
-
-		if c.Bind(&json) == nil {
-			db[user] = json.Value
-			c.JSON(http.StatusOK, gin.H{"status": "ok"})
-		}
-	})
+	// delete events
+	//r.GET("/trigger/events", getEvents)
 
 	return r
 }
 
 func main() {
+	tr = NewTrigger()
+
 	r := setupRouter()
 	// Listen and Server in 0.0.0.0:8080
 	r.Run(":8080")
